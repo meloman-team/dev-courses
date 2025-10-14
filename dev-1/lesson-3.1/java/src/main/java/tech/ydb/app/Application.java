@@ -7,6 +7,7 @@ import tech.ydb.query.QueryClient;
 import tech.ydb.query.tools.SessionRetryContext;
 
 import java.time.Duration;
+import java.util.List;
 
 /**
  * @author Kirill Kurdyukov
@@ -39,6 +40,19 @@ public class Application {
                 }
 
                 LOGGER.info("First issue: {}", issueYdbRepository.findById(firstIssue.id()));
+
+                String prefix = String.valueOf(firstIssue.id()).substring(0,1);
+                List<Issue> byPrefixId = issueYdbRepository.findByPrefixId(prefix);
+                if(byPrefixId == null) {
+                    LOGGER.debug("Not found by prefix \"{}\"", prefix);
+                } else {
+                    int i = 0;
+                    LOGGER.debug("Found {} records by prefix \"{}\"", byPrefixId.size(), prefix);
+                    for (Issue issue : byPrefixId) {
+                        i++;
+                        LOGGER.debug("[{}] {}", i, issue);
+                    }
+                }
             }
         }
     }

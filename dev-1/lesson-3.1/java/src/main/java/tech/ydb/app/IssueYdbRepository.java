@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tech.ydb.common.transaction.TxMode;
 import tech.ydb.query.tools.SessionRetryContext;
 import tech.ydb.table.query.Params;
@@ -19,6 +21,8 @@ import javax.annotation.Nullable;
  * @author Kirill Kurdyukov
  */
 public class IssueYdbRepository {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Application.class);
 
     // Контекст для автоматических повторных попыток выполнения запросов
     // Принимается извне через конструктор для:
@@ -84,6 +88,37 @@ public class IssueYdbRepository {
                 resultSetReader.getColumn(1).getText(),
                 resultSetReader.getColumn(2).getTimestamp()
         ) : null;
+    }
+
+    /**
+     * Возвращает тикеты с указанным префиксом id
+     *
+     * @param idPrefix префикс id для поиска. пример: 123
+     * @return найденные тикеты или null, если нет результатов. Пример: 1230
+     */
+    @Nullable
+    public List<Issue> findByPrefixId(String idPrefix) {
+        // Выполняем SELECT запрос в режиме SNAPSHOT_RO для чтения данных
+        // Этот режим сообщает серверу, что это транзакция только для чтения.
+        // Это позволяет снизить накладные расходы на подготовку к изменениям и просто читать данные из
+        // одного снимка базы данных.
+        var resultSet = queryServiceHelper.executeQuery("SELECT id, title, created_at FROM issues WHERE CAST(id AS STRING) LIKE $prefix;",
+                TxMode.SNAPSHOT_RO, Params.of("$prefix", PrimitiveValue.newText(idPrefix + '%')));
+
+        var resultSetReader = resultSet.getResultSet(0);
+
+        LOGGER.debug("ResultSetCount: " + resultSet.getResultSetCount());
+        List<Issue> results = new ArrayList<>();
+        while (resultSetReader.next()) {
+            results.add(
+                    new Issue(
+                    resultSetReader.getColumn(0).getInt64(),
+                    resultSetReader.getColumn(1).getText(),
+                    resultSetReader.getColumn(2).getTimestamp())
+            );
+        }
+
+        return results.isEmpty() ? null : results;
     }
 
     /**

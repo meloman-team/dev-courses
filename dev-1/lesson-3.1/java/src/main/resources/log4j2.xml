@@ -15,6 +15,9 @@
         <Logger name="tech.ydb.core.grpc" level="info" additivity="false">
             <AppenderRef ref="Console"/>
         </Logger>
+        <Logger name="tech.ydb.app.Application" level="debug" additivity="false">
+            <AppenderRef ref="Console"/>
+        </Logger>
 
         <Root level="info">
             <AppenderRef ref="Console"/>
