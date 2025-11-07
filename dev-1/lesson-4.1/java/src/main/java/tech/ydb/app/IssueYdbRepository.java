@@ -1,15 +1,16 @@
 package tech.ydb.app;
 
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.ThreadLocalRandom;
-
 import tech.ydb.common.transaction.TxMode;
 import tech.ydb.query.tools.QueryReader;
 import tech.ydb.query.tools.SessionRetryContext;
 import tech.ydb.table.query.Params;
 import tech.ydb.table.values.PrimitiveValue;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Репозиторий для работы с тикетами в базе данных YDB
@@ -54,6 +55,34 @@ public class IssueYdbRepository {
         );
 
         return getLinkTicketPairs(valueReader);
+    }
+
+    public void delTicketsNoInteractive(long idT1, long idT2) {
+        queryServiceHelper.executeQuery(
+                """
+                        DECLARE $t1 AS Int64;
+                        DECLARE $t2 AS Int64;
+                                               
+                        -- Удаляем записи о связях между тикетами
+                        DELETE FROM links
+                        WHERE (source = $t1 and destination = $t2) 
+                           OR (source = $t2 and destination = $t1);
+                                                 
+                        -- Обновляем счетчики связей
+                        UPDATE issues
+                        SET link_count = COALESCE(link_count, 0) - 1
+                        WHERE id IN ($t1, $t2);
+                                       
+                        -- Валидация счетчиков после удаления       
+                        SELECT Ensure(
+                            link_count,
+                            link_count >= 0,
+                            "value out or range"
+                        ) AS value FROM issues;
+                        """,
+                TxMode.SERIALIZABLE_RW,
+                Params.of("$t1", PrimitiveValue.newInt64(idT1), "$t2", PrimitiveValue.newInt64(idT2))
+        );
     }
 
     /**
@@ -105,6 +134,46 @@ public class IssueYdbRepository {
                     );
 
                     return getLinkTicketPairs(valueReader);
+                }
+        );
+    }
+
+    public void delTicketsInteractive(long idT1, long idT2) {
+        queryServiceHelper.executeInTx(
+                TxMode.SERIALIZABLE_RW, // Транзакция будет изменять данные, поэтому используем режим SERIALIZABLE_RW
+                tx -> {
+                    // Удаляем записи о связях между тикетами
+                    tx.executeQuery("""
+                                    DECLARE $t1 AS Int64;
+                                    DECLARE $t2 AS Int64;
+                            
+                                    DELETE FROM links
+                                    WHERE (source = $t1 and destination = $t2) 
+                                       OR (source = $t2 and destination = $t1);
+                                    """,
+                            Params.of("$t1", PrimitiveValue.newInt64(idT1), "$t2", PrimitiveValue.newInt64(idT2))
+                    );
+
+                    // Обновляем счетчики связей
+                    tx.executeQuery("""
+                                    UPDATE issues
+                                    SET link_count = COALESCE(link_count, 0) - 1
+                                    WHERE id IN ($t1, $t2);
+                                    """,
+                            Params.of("$t1", PrimitiveValue.newInt64(idT1), "$t2", PrimitiveValue.newInt64(idT2))
+                    );
+
+                    // Валидация счетчиков после удаления
+                    tx.executeQueryWithCommit("""
+                                    SELECT Ensure(
+                                        link_count,
+                                        link_count >= 0,
+                                        "value out or range"
+                                    ) AS value FROM issues;
+                                    """
+                    );
+
+                    return Collections.emptyList();
                 }
         );
     }

@@ -70,6 +70,11 @@ public class Application {
                 for (var ticket : issueYdbRepository.findAll()) {
                     printIssue(ticket);
                 }
+
+                issueYdbRepository.delTicketsNoInteractive(first.id(), second.id());
+                issueYdbRepository.delTicketsInteractive(third.id(), second.id());
+//                issueYdbRepository.delTicketsNoInteractive(third.id(), first.id()); // Бросает исключение при проверке устловия Ensure
+//                issueYdbRepository.delTicketsInteractive(third.id(), first.id()); // Бросает исключение при проверке устловия Ensure
             }
         }
     }
