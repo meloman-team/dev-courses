@@ -22,4 +22,8 @@ public class TransactionHelper {
     public QueryReader executeQueryWithCommit(String yql, Params params) {
         return QueryReader.readFrom(transaction.createQueryWithCommit(yql, params)).join().getValue();
     }
+
+    public QueryReader executeQueryWithCommit(String yql) {
+        return QueryReader.readFrom(transaction.createQueryWithCommit(yql)).join().getValue();
+    }
 }
