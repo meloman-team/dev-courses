@@ -45,6 +45,10 @@ public class SchemaYdbRepository {
                 );
                 """
         );
+
+        // Создаем глобальный вторичный индекс по полю author и created_at
+        // Этот индекс позволяет эффективно искать тикеты по автору через '=' и условию по created_at например '>'
+        queryServiceHelper.executeQuery("ALTER TABLE issues ADD INDEX authorAndCreatedAtIndex GLOBAL ON (author, created_at) COVER (title, link_count);");
     }
 
     public void dropSchema() {
