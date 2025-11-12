@@ -178,6 +178,52 @@ public class IssueYdbRepository {
     }
 
     /**
+     * Находит первые 10 тикетов по автору, используя вторичный индекс authorAndCreatedAtIndex
+     *
+     * @param author имя автора для поиска
+     * @return найденный тикет
+     */
+    public List<Issue> findByAuthorFirst10(String author) {
+        var resultSet = queryServiceHelper.executeQuery("""
+                        DECLARE $author AS Text;
+                        SELECT id, title, created_at, author, COALESCE(link_count, 0)
+                        FROM issues
+                        VIEW authorAndCreatedAtIndex
+                        WHERE author = $author
+                        ORDER BY created_at
+                        LIMIT 10;
+                        """,
+                TxMode.SNAPSHOT_RO,
+                Params.of("$author", PrimitiveValue.newText(author))
+        );
+
+        return mapIssueList(resultSet);
+    }
+
+    /**
+     * Находит последние 10 тикетов по автору, используя вторичный индекс authorAndCreatedAtIndex
+     *
+     * @param author имя автора для поиска
+     * @return найденный тикет
+     */
+    public List<Issue> findByAuthorLast10(String author) {
+        var resultSet = queryServiceHelper.executeQuery("""
+                        DECLARE $author AS Text;
+                        SELECT id, title, created_at, author, COALESCE(link_count, 0)
+                        FROM issues
+                        VIEW authorAndCreatedAtIndex
+                        WHERE author = $author
+                        ORDER BY created_at DESC
+                        LIMIT 10;
+                        """,
+                TxMode.SNAPSHOT_RO,
+                Params.of("$author", PrimitiveValue.newText(author))
+        );
+
+        return mapIssueList(resultSet);
+    }
+
+    /**
      * Преобразует результаты запроса в список объектов
      */
     private static List<IssueLinkCount> getLinkTicketPairs(QueryReader valueReader) {
@@ -190,5 +236,26 @@ public class IssueYdbRepository {
             );
         }
         return linkTicketPairs;
+    }
+
+    /**
+     * Преобразует результаты запроса в список объектов
+     */
+    private static List<Issue> mapIssueList(QueryReader valueReader) {
+        var result = new ArrayList<Issue>();
+        var resultSet = valueReader.getResultSet(0);
+
+        while (resultSet.next()) {
+            result.add(
+                    new Issue(
+                            resultSet.getColumn(0).getInt64(),
+                            resultSet.getColumn(1).getText(),
+                            resultSet.getColumn(2).getTimestamp(),
+                            resultSet.getColumn(3).getText(),
+                            resultSet.getColumn(4).getInt64()
+                    )
+            );
+        }
+        return result;
     }
 }
