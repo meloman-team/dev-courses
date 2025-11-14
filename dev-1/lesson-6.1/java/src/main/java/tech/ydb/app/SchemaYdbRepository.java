@@ -52,11 +52,32 @@ public class SchemaYdbRepository {
         );
     }
 
+    public void createEventsTopic() {
+        queryServiceHelper.executeQuery("""
+                CREATE TOPIC IF NOT EXISTS events(
+                    CONSUMER ConsumerEvents
+                ) WITH(
+                    auto_partitioning_strategy='scale_up',
+                    min_active_partitions=2,
+                    max_active_partitions=10,
+                    retention_period = Interval('P3D')
+                );
+                """
+        );
+    }
+
     public void dropSchema() {
         queryServiceHelper.executeQuery("""
                 DROP TABLE IF EXISTS issues;
                 DROP TABLE IF EXISTS links;
                 DROP TOPIC IF EXISTS task_status;
+                """
+        );
+    }
+
+    public void dropEventsTopic() {
+        queryServiceHelper.executeQuery("""
+                DROP TOPIC IF EXISTS events;
                 """
         );
     }
