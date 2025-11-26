@@ -3,15 +3,17 @@ package tech.ydb.app;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 import tech.ydb.common.transaction.TxMode;
-import tech.ydb.core.Result;
+import tech.ydb.query.QueryTransaction;
 import tech.ydb.query.tools.QueryReader;
 import tech.ydb.query.tools.SessionRetryContext;
 import tech.ydb.table.query.Params;
 import tech.ydb.table.values.PrimitiveValue;
+import tech.ydb.topic.read.Message;
 
 /**
  * @author Kirill Kurdyukov
@@ -33,6 +35,54 @@ public class IssueYdbRepository {
                         """,
                 TxMode.SERIALIZABLE_RW,
                 Params.of("$id", PrimitiveValue.newInt64(id), "$new_status", PrimitiveValue.newText(status))
+        );
+    }
+
+    /**
+     * Обновляет статус таски в рамках транзакции после выполнения переданной функции
+     *
+     * @param id id таски статус которой нужно обновить
+     * @param status статус который нужно установить
+     * @param consumer функция для выполнения в рамках транзакции
+     */
+    public void updateStatusTx(long id, String status, Consumer<QueryTransaction> consumer) {
+        queryServiceHelper.executeInBeginTx(TxMode.SERIALIZABLE_RW,
+                tx -> {
+                    QueryTransaction transaction = tx.getTransaction();
+                    consumer.accept(transaction);
+                    tx.executeQuery("""
+                        DECLARE $id AS Int64;
+                        DECLARE $new_status AS Text;
+                                                            
+                        UPDATE issues SET status = $new_status WHERE id = $id;
+                                    """,
+                            Params.of("$id", PrimitiveValue.newInt64(id), "$new_status", PrimitiveValue.newText(status))
+                    );
+                    transaction.commit().join();
+                }
+        );
+    }
+
+    /**
+     * Увеличивает счетчик change_status на 1 в рамках транзакции после выполнения переданной функции
+     *
+     * @param function функция для выполнения в рамках транзакции
+     */
+    public Message incChangeStatusTx(Function<TransactionHelper, Message> function) {
+        return queryServiceHelper.executeInBeginTx(TxMode.SERIALIZABLE_RW,
+                tx -> {
+                    QueryTransaction transaction = tx.getTransaction();
+                    Message message = function.apply(tx);
+                    // Если сообщение не найдено, то откатываем транзакцию
+                    if (message == null) {
+                        transaction.rollback().join();
+                        return null;
+                    }
+                    tx.executeQuery("""
+                        UPDATE eventCounter SET count = count + 1 WHERE id = "change_status";
+                        """);
+                    return message;
+                }
         );
     }
 

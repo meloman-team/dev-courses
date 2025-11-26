@@ -50,18 +50,20 @@ public class Application {
 
             LOGGER.info("Update status all tickets: NULL -> OPEN ");
             for (var issue : allIssues) {
-                updateService.update(issue.id(), "OPEN");
+//                updateService.update(issue.id(), "OPEN");
+                updateService.updateTx(issue.id(), "OPEN");
             }
 
             // Запускаем воркер для чтения сообщений из топика в отдельном потоке
             // он будет получать события об обновлении тикетов и эмулировать отправку 
             // уведомлений
-            var readerWorker = new ReaderWorker(topicClient);
+            var readerWorker = new ReaderWorker(topicClient, issueYdbRepository);
             readerWorker.run();
 
             LOGGER.info("Update status all tickets: OPEN -> IN_PROGRESS ");
             for (var issue : allIssues) {
-                updateService.update(issue.id(), "IN_PROGRESS");
+//                updateService.update(issue.id(), "IN_PROGRESS");
+                updateService.updateTx(issue.id(), "IN_PROGRESS");
             }
 
             // Корректно завершаем работу сервисов

@@ -50,6 +50,16 @@ public class SchemaYdbRepository {
                 ALTER TABLE issues ADD COLUMN status Text;
                 """
         );
+
+        queryServiceHelper.executeQuery("""
+                CREATE TABLE IF NOT EXISTS eventCounter (id Text NOT NULL, count Int64, PRIMARY KEY(id));
+                """
+        );
+
+        queryServiceHelper.executeQuery("""
+                INSERT INTO eventCounter (id, count) VALUES ("change_status", 0);
+                """
+        );
     }
 
     public void createEventsTopic() {
@@ -71,6 +81,7 @@ public class SchemaYdbRepository {
                 DROP TABLE IF EXISTS issues;
                 DROP TABLE IF EXISTS links;
                 DROP TOPIC IF EXISTS task_status;
+                DROP TABLE IF EXISTS eventCounter;
                 """
         );
     }
