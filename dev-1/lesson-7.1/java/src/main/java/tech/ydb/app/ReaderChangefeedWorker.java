@@ -16,12 +16,13 @@ import tech.ydb.topic.settings.TopicReadSettings;
 public class ReaderChangefeedWorker {
     private static final Logger LOGGER = LoggerFactory.getLogger(Application.class);
 
-    private final SyncReader reader;
+    private final SyncReader readerIssues;
+    private final SyncReader readerLinks;
 
     public ReaderChangefeedWorker(TopicClient topicClient) {
         // Создаем reader для чтения изменений из топика changefeed
         // С точки зрения читателя это обычный топик.
-        this.reader = topicClient.createSyncReader(
+        this.readerIssues = topicClient.createSyncReader(
                 ReaderSettings.newBuilder()
                         .setConsumerName("test")
                         .setTopics(
@@ -30,10 +31,25 @@ public class ReaderChangefeedWorker {
                         .build()
         );
 
-        reader.init();
+        this.readerLinks = topicClient.createSyncReader(
+                ReaderSettings.newBuilder()
+                        .setConsumerName("ConsumerLinksChangefeed")
+                        .setTopics(
+                                List.of(TopicReadSettings.newBuilder().setPath("links/updates").build())
+                        )
+                        .build()
+        );
+
+        readerIssues.init();
+        readerLinks.init();
     }
 
     public void readChangefeed() {
+        read(readerIssues);
+        read(readerLinks);
+    }
+
+    public void read(SyncReader reader) {
         CompletableFuture.runAsync(
                 () -> {
                     LOGGER.info("Started read worker!");
@@ -43,16 +59,18 @@ public class ReaderChangefeedWorker {
                             var message = reader.receive(1, TimeUnit.SECONDS);
 
                             if (message == null) {
-                                continue;
+                                LOGGER.info("Нет сообщений для чтения");
+                                break;
                             }
 
                             LOGGER.info("Received message: {}", new String(message.getData()));
+                            message.commit();
 
-                            if (message.getSeqNo() == 4 /* отслеживаем 4 действия */) {
-                                break;
-                            }
+//                            if (message.getSeqNo() == 4 /* отслеживаем 4 действия */) {
+//                                break;
+//                            }
                         } catch (Exception e) {
-                            // Ignored
+                            LOGGER.warn("Warning: ", e);
                         }
                     }
 

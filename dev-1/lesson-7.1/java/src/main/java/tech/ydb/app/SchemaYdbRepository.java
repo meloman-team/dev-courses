@@ -69,10 +69,32 @@ public class SchemaYdbRepository {
                 ).execute()
         ).join().getStatus().expectSuccess("Can't create schema");
 
+        // Создаем changefeed для отслеживания изменений в таблице links
+        retryCtx.supplyResult(
+                session -> session.createQuery(
+                        """
+                                ALTER TABLE links ADD CHANGEFEED updates WITH (
+                                    FORMAT = 'JSON',
+                                    MODE = 'NEW_AND_OLD_IMAGES',
+                                    VIRTUAL_TIMESTAMPS = TRUE,
+                                    INITIAL_SCAN = TRUE
+                                );
+                                """, TxMode.NONE
+                ).execute()
+        ).join().getStatus().expectSuccess("Can't create schema");
+
         retryCtx.supplyResult(
                 session -> session.createQuery(
                         """
                                 ALTER TOPIC `issues/updates` ADD CONSUMER test;
+                                """, TxMode.NONE
+                ).execute()
+        ).join().getStatus().expectSuccess("Can't create schema");
+
+        retryCtx.supplyResult(
+                session -> session.createQuery(
+                        """
+                                ALTER TOPIC `links/updates` ADD CONSUMER ConsumerLinksChangefeed;
                                 """, TxMode.NONE
                 ).execute()
         ).join().getStatus().expectSuccess("Can't create schema");

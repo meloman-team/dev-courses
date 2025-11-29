@@ -49,6 +49,9 @@ public class Application {
             // в changefeed-топик ещё раз.
             issueYdbRepository.delete(second.id());
 
+            issueYdbRepository.linkTicketsNoInteractive(first.id(), second.id());
+            issueYdbRepository.delTicketsNoInteractive(first.id(), second.id());
+
             // Запускаем воркер для чтения изменений из changefeed
             var readerWorker = new ReaderChangefeedWorker(topicClient);
             readerWorker.readChangefeed();

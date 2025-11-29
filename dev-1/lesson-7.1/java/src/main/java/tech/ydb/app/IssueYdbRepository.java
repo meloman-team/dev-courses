@@ -56,6 +56,34 @@ public class IssueYdbRepository {
         return getLinkTicketPairs(valueReader);
     }
 
+    public void delTicketsNoInteractive(long idT1, long idT2) {
+        queryServiceHelper.executeQuery(
+                """
+                        DECLARE $t1 AS Int64;
+                        DECLARE $t2 AS Int64;
+                                               
+                        -- Удаляем записи о связях между тикетами
+                        DELETE FROM links
+                        WHERE (source = $t1 and destination = $t2) 
+                           OR (source = $t2 and destination = $t1);
+                                                 
+                        -- Обновляем счетчики связей
+                        UPDATE issues
+                        SET link_count = COALESCE(link_count, 0) - 1
+                        WHERE id IN ($t1, $t2);
+                                       
+                        -- Валидация счетчиков после удаления       
+                        SELECT Ensure(
+                            link_count,
+                            link_count >= 0,
+                            "value out or range"
+                        ) AS value FROM issues;
+                        """,
+                TxMode.SERIALIZABLE_RW,
+                Params.of("$t1", PrimitiveValue.newInt64(idT1), "$t2", PrimitiveValue.newInt64(idT2))
+        );
+    }
+
     public List<IssueLinkCount> linkTicketsInteractive(long idT1, long idT2) {
         return queryServiceHelper.executeInTx(TxMode.SERIALIZABLE_RW,
                 tx -> {
