@@ -29,13 +29,37 @@ public class Application {
             schemaYdbRepository.dropSchema();
             schemaYdbRepository.createSchema();
             issueYdbRepository.saveAll(List.of(
-                    "Ticket 1",
-                    "Ticket 2",
-                    "Ticket 3"
+                    new Issue("Ticket 1", "author"),
+                    new Issue("Ticket 2", "me"),
+                    new Issue("Ticket 3", "you")
                 )
             );
 
             var allTickets = issueYdbRepository.findAll();
+
+            issueYdbRepository.linkTicketsNoInteractive(allTickets.get(0).id(), allTickets.get(2).id());
+
+            Long count = issueYdbRepository.getSumLinks(List.of(new IssueLink(allTickets.get(0), allTickets.get(1))));
+            LOGGER.info("count: {}", count); // Ожидаем 0
+
+            count = issueYdbRepository.getSumLinks(List.of(
+                    new IssueLink(allTickets.get(0), allTickets.get(1)),
+                    new IssueLink(allTickets.get(0), allTickets.get(2))
+            ));
+            LOGGER.info("count: {}", count); // Ожидаем 1
+
+            count = issueYdbRepository.getSumLinks(List.of(
+                    new IssueLink(allTickets.get(0), allTickets.get(1)),
+                    new IssueLink(allTickets.get(0), allTickets.get(2)),
+                    new IssueLink(allTickets.get(2), allTickets.get(0))
+            ));
+            LOGGER.info("count: {}", count); // Ожидаем 2
+
+            String title = issueYdbRepository.updateTitleToUpper(allTickets.get(2).id());
+            LOGGER.info("title: {}", title);
+
+            long titleCount = issueYdbRepository.likeTitleCount("T");
+            LOGGER.info("titleCount: {}", titleCount); // Ожидаем 2
 
             for (var issue : allTickets) {
                 issueYdbRepository.updateStatus(issue.id(), "future");

@@ -10,7 +10,6 @@ import tech.ydb.query.tools.QueryReader;
 import tech.ydb.query.tools.SessionRetryContext;
 import tech.ydb.table.query.Params;
 import tech.ydb.table.values.ListType;
-import tech.ydb.table.values.OptionalType;
 import tech.ydb.table.values.PrimitiveType;
 import tech.ydb.table.values.PrimitiveValue;
 import tech.ydb.table.values.StructType;
@@ -47,22 +46,54 @@ public class IssueYdbRepository {
     }
 
     /**
+     * Вернет количество подтвержденных связей
+     *
+     * @param issues список пар тикетов
+     * @return суммарное количество связей
+     */
+    public Long getSumLinks(List<IssueLink> issues) {
+        var structType = StructType.of("id", PrimitiveType.Int64, "idLink", PrimitiveType.Int64);
+
+        var idsParams = Params.of("$ids", ListType.of(structType).newValue(
+                issues.stream().map(entry -> structType.newValue(
+                        "id", PrimitiveValue.newInt64(entry.main().id()),
+                        "idLink", PrimitiveValue.newInt64(entry.link().id())))
+                        .toList())
+        );
+        var queryReader = queryServiceHelper.executeQuery("""
+                        DECLARE $ids AS List<Struct<id: Int64, idLink: Int64>>;
+
+                        SELECT COUNT(*)
+                        FROM links WHERE source IN (SELECT id FROM AS_TABLE($ids))
+                                   AND destination IN (SELECT idLink FROM AS_TABLE($ids));
+
+                        """,
+                TxMode.SERIALIZABLE_RW,
+                idsParams
+        );
+
+        return getLinkCount(queryReader);
+    }
+
+    /**
      * Пакетное добавление нескольких тикетов за один запрос
      */
-    public void saveAll(List<String> issues) {
+    public void saveAll(List<Issue> issues) {
 
         // Тут описывается структура данных, которая будет служить виртуальной таблицей.
         var structType = StructType.of(
                 "id", PrimitiveType.Int64,
                 "title", PrimitiveType.Text,
-                "created_at", PrimitiveType.Timestamp
+                "created_at", PrimitiveType.Timestamp,
+                "author", PrimitiveType.Text
         );
 
         var listIssues = Params.of("$args", ListType.of(structType).newValue(
                 issues.stream().map(issue -> structType.newValue(
-                        "id", PrimitiveValue.newInt64(ThreadLocalRandom.current().nextLong()),
-                        "title", PrimitiveValue.newText(issue),
-                        "created_at", PrimitiveValue.newTimestamp(Instant.now())
+                        "id", PrimitiveValue.newInt64(issue.id()),
+                        "title", PrimitiveValue.newText(issue.title()),
+                        "created_at", PrimitiveValue.newTimestamp(issue.now()),
+                        "author", PrimitiveValue.newText(issue.author())
                 )).toList()
         ));
 
@@ -71,6 +102,7 @@ public class IssueYdbRepository {
                         id: Int64,
                         title: Text,
                         created_at: Timestamp,
+                        author: Text
                         >>;
 
                         UPSERT INTO issues
@@ -92,6 +124,58 @@ public class IssueYdbRepository {
                 Params.of("$id", PrimitiveValue.newInt64(id),
                         "$new_status", PrimitiveValue.newText(status))
         );
+    }
+
+    public String updateTitleToUpper(long id) {
+        QueryReader queryReader = queryServiceHelper.executeQuery("""
+                        DECLARE $id AS Int64;
+                        
+                        UPDATE issues SET title=Unicode::ToUpper(title) WHERE id=$id RETURNING title;
+                        """,
+                TxMode.SERIALIZABLE_RW,
+                Params.of("$id", PrimitiveValue.newInt64(id))
+        );
+        return getTitle(queryReader);
+    }
+
+    /**
+     * Упростите запрос — используйте именованные выражения:
+     *
+     * DECLARE $title AS Text;
+     *
+     * SELECT id, title
+     * FROM issues
+     * WHERE title LIKE $title || '%';
+     *
+     * SELECT COUNT(*)
+     * FROM links
+     * WHERE source IN (
+     *     SELECT id
+     *     FROM issues
+     *     WHERE title LIKE $title || '%'
+     * );
+     */
+    public Long likeTitleCount(String title) {
+        QueryReader queryReader = queryServiceHelper.executeQuery("""
+                        DECLARE $title AS Text;
+                        
+                        $fun = SELECT id, title
+                        FROM issues
+                        WHERE title LIKE $title || '%';
+                        
+                        SELECT id FROM $fun;
+                        
+                        SELECT COUNT(*)
+                        FROM links
+                        WHERE source IN (
+                            SELECT id
+                            FROM $fun
+                        );
+                        """,
+                TxMode.SERIALIZABLE_RW,
+                Params.of("$title", PrimitiveValue.newText(title))
+        );
+        return getLikeTitleCount(queryReader);
     }
 
     public List<IssueLinkCount> linkTicketsNoInteractive(long idT1, long idT2) {
@@ -329,6 +413,33 @@ public class IssueYdbRepository {
             linkTicketPairs.add(new IssueLinkCount(resultSet.getColumn(0).getInt64(), resultSet.getColumn(1).getInt64()));
         }
         return linkTicketPairs;
+    }
+
+    private static Long getLinkCount(QueryReader valueReader) {
+        var resultSet = valueReader.getResultSet(0);
+
+        if (resultSet.next()) {
+            return resultSet.getColumn(0).getUint64();
+        }
+        return null;
+    }
+
+    private static Long getLikeTitleCount(QueryReader valueReader) {
+        var resultSet = valueReader.getResultSet(1);
+
+        if (resultSet.next()) {
+            return resultSet.getColumn(0).getUint64();
+        }
+        return null;
+    }
+
+    private static String getTitle(QueryReader valueReader) {
+        var resultSet = valueReader.getResultSet(0);
+
+        if (resultSet.next()) {
+            return resultSet.getColumn(0).getText();
+        }
+        return null;
     }
 
     private static List<Issue> fetchIssues(QueryReader queryReader) {
