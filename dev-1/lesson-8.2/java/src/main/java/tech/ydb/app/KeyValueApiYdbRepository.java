@@ -24,6 +24,14 @@ public class KeyValueApiYdbRepository {
 
     private final SessionRetryContext retryTableCtx;
 
+    //Названия колонок в таблице issues
+    private final String idColumnName = "id";
+    private final String titleColumnName = "title";
+    private final String createdAtColumnName = "created_at";
+    private final String authorColumnName = "author";
+    private final String linkCountColumnName = "link_count";
+    private final String statusColumnName = "status";
+
     public KeyValueApiYdbRepository(SessionRetryContext retryTableCtx) {
         this.retryTableCtx = retryTableCtx;
     }
@@ -38,18 +46,18 @@ public class KeyValueApiYdbRepository {
         // остальные - опциональные. Если запись с таким первичным ключём уже существует, то
         // переданные поля обновятся, а остальные - сохранят прежние значения.
         var structType = StructType.of(
-                "id", PrimitiveType.Int64,
-                "title", PrimitiveType.Text,
-                "author", PrimitiveType.Text,
-                "created_at", OptionalType.of(PrimitiveType.Timestamp)
+                idColumnName, PrimitiveType.Int64,
+                titleColumnName, PrimitiveType.Text,
+                authorColumnName, PrimitiveType.Text,
+                createdAtColumnName, OptionalType.of(PrimitiveType.Timestamp)
         );
 
         var listIssues = ListType.of(structType).newValue(
                 titleAuthorList.stream().map(issue -> structType.newValue(
-                        "id", PrimitiveValue.newInt64(ThreadLocalRandom.current().nextLong()),
-                        "title", PrimitiveValue.newText(issue.title()),
-                        "author", PrimitiveValue.newText(issue.author()),
-                        "created_at", OptionalType.of(PrimitiveType.Timestamp)
+                        idColumnName, PrimitiveValue.newInt64(ThreadLocalRandom.current().nextLong()),
+                        titleColumnName, PrimitiveValue.newText(issue.title()),
+                        authorColumnName, PrimitiveValue.newText(issue.author()),
+                        createdAtColumnName, OptionalType.of(PrimitiveType.Timestamp)
                                 .newValue(PrimitiveValue.newTimestamp(Instant.now()))
                 )).toList()
         );
@@ -86,15 +94,15 @@ public class KeyValueApiYdbRepository {
      * Использует readRows для получения записей по конкретному id.
      */
     public List<Issue> readRows(String tableName, long id) {
-        var keyStruct = StructType.of("id", PrimitiveType.Int64);
+        var keyStruct = StructType.of(idColumnName, PrimitiveType.Int64);
 
         return retryTableCtx.supplyResult(session -> {
                     var listResult = new ArrayList<Issue>();
 
                     var resultSetReader = session.readRows(tableName,
                             ReadRowsSettings.newBuilder()
-                                    .addKey(keyStruct.newValue("id", PrimitiveValue.newInt64(id)))
-                                    .addColumns("id", "title", "created_at", "author")
+                                    .addKey(keyStruct.newValue(idColumnName, PrimitiveValue.newInt64(id)))
+                                    .addColumns(idColumnName, titleColumnName, createdAtColumnName, authorColumnName)
                                     .build()
                     ).join().getValue().getResultSetReader();
 
@@ -111,28 +119,43 @@ public class KeyValueApiYdbRepository {
      */
     private void fetchIssues(ArrayList<Issue> listResult, ResultSetReader resultSetReader) {
         while (resultSetReader.next()) {
-            var id = resultSetReader.getColumn(0).getInt64();
+            var id = resultSetReader.getColumn(resultSetReader.getColumnIndex(idColumnName)).getInt64();
 
-            long linksCount;
-            if (resultSetReader.getColumnCount() > 4) {
-                linksCount = resultSetReader.getColumn(4).getInt64();
-            } else {
-                linksCount = 0;
-            }
+            int linkCountColumnIndex = resultSetReader.getColumnIndex(linkCountColumnName);
+            long linksCount = linkCountColumnIndex > -1
+                    ? resultSetReader.getColumn(linkCountColumnIndex).getInt64()
+                    : 0;
 
-            String status;
-            if (resultSetReader.getColumnCount() > 5) {
-                status = resultSetReader.getColumn(5).getText();
-            } else {
-                status = "";
-            }
+            int statusColumnIndex = resultSetReader.getColumnIndex(statusColumnName);
+            String status = statusColumnIndex > -1
+                    ? resultSetReader.getColumn(statusColumnIndex).getText()
+                    : "";
+
+            int titleColumnIndex = resultSetReader.getColumnIndex(titleColumnName);
+            String title = titleColumnIndex > -1
+                    ? resultSetReader.getColumn(titleColumnIndex).getText()
+                    : null;
+            if (title == null)
+                throw new NullPointerException("NULL value provided for mandatory field 'title'. The field is mapped to a database column with a NOT NULL constraint.");
+
+            int createdAtColumnIndex = resultSetReader.getColumnIndex(createdAtColumnName);
+            Instant createdAt = createdAtColumnIndex > -1
+                    ? resultSetReader.getColumn(createdAtColumnIndex).getTimestamp()
+                    : null;
+            if (createdAt == null)
+                throw new NullPointerException("NULL value provided for mandatory field 'created_at'. The field is mapped to a database column with a NOT NULL constraint.");
+
+            int authorColumnIndex = resultSetReader.getColumnIndex(authorColumnName);
+            String author = authorColumnIndex > -1
+                    ? resultSetReader.getColumn(authorColumnIndex).getText()
+                    : "";
 
             listResult.add(
                     new Issue(
                             id,
-                            resultSetReader.getColumn(1).getText(),
-                            resultSetReader.getColumn(2).getTimestamp(),
-                            resultSetReader.getColumn(3).getText(),
+                            title,
+                            createdAt,
+                            author,
                             linksCount,
                             status
                     )
