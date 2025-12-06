@@ -1,21 +1,22 @@
 package tech.ydb.app;
 
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ThreadLocalRandom;
-
 import tech.ydb.core.Result;
 import tech.ydb.table.SessionRetryContext;
 import tech.ydb.table.result.ResultSetReader;
+import tech.ydb.table.result.ValueReader;
 import tech.ydb.table.settings.ReadRowsSettings;
 import tech.ydb.table.settings.ReadTableSettings;
 import tech.ydb.table.values.ListType;
-import tech.ydb.table.values.OptionalType;
 import tech.ydb.table.values.PrimitiveType;
 import tech.ydb.table.values.PrimitiveValue;
 import tech.ydb.table.values.StructType;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * @author Kirill Kurdyukov
@@ -32,6 +33,10 @@ public class KeyValueApiYdbRepository {
     private final String linkCountColumnName = "link_count";
     private final String statusColumnName = "status";
 
+    // Названия колонок в таблице links
+    private final String sourceColumnName = "source";
+    private final String destinationColumnName = "destination";
+
     public KeyValueApiYdbRepository(SessionRetryContext retryTableCtx) {
         this.retryTableCtx = retryTableCtx;
     }
@@ -39,30 +44,51 @@ public class KeyValueApiYdbRepository {
     /**
      * Массовое добавление или обновление тикетов в таблице.
      */
-    public void bulkUpsert(String tableName, List<TitleAuthor> titleAuthorList) {
+    public void bulkUpsert(String tableName, List<Issue> issues) {
 
         // Описывает структуру с полями, которые будут добавляться в таблицу.
         // Смысл операции тот же что для запроса UPSERT. Поля первичного ключа - обязательные, 
         // остальные - опциональные. Если запись с таким первичным ключём уже существует, то
         // переданные поля обновятся, а остальные - сохранят прежние значения.
-        var structType = StructType.of(
+        var structType = StructType.of(Map.of(
                 idColumnName, PrimitiveType.Int64,
                 titleColumnName, PrimitiveType.Text,
+                createdAtColumnName, PrimitiveType.Timestamp,
                 authorColumnName, PrimitiveType.Text,
-                createdAtColumnName, OptionalType.of(PrimitiveType.Timestamp)
-        );
+                linkCountColumnName, PrimitiveType.Int64,
+                statusColumnName, PrimitiveType.Text
+        ));
 
         var listIssues = ListType.of(structType).newValue(
-                titleAuthorList.stream().map(issue -> structType.newValue(
-                        idColumnName, PrimitiveValue.newInt64(ThreadLocalRandom.current().nextLong()),
+                issues.stream().map(issue -> structType.newValue(Map.of(
+                        idColumnName, PrimitiveValue.newInt64(issue.id()),
                         titleColumnName, PrimitiveValue.newText(issue.title()),
+                        createdAtColumnName, PrimitiveValue.newTimestamp(issue.now()),
                         authorColumnName, PrimitiveValue.newText(issue.author()),
-                        createdAtColumnName, OptionalType.of(PrimitiveType.Timestamp)
-                                .newValue(PrimitiveValue.newTimestamp(Instant.now()))
-                )).toList()
+                        linkCountColumnName, PrimitiveValue.newInt64(issue.linkCounts()),
+                        statusColumnName, PrimitiveValue.newText(issue.status())
+                ))).toList()
         );
 
         retryTableCtx.supplyStatus(session -> session.executeBulkUpsert(tableName, listIssues))
+                .join().expectSuccess();
+    }
+
+    /**
+     * Массовое обновление связей в таблице links
+     */
+    public void bulkUpsertLinks(List<Link> links) {
+        var structType = StructType.of(
+                sourceColumnName, PrimitiveType.Int64,
+                destinationColumnName, PrimitiveType.Int64
+        );
+        var listLinks = ListType.of(structType).newValue(
+                links.stream().map(link -> structType.newValue(
+                        sourceColumnName, PrimitiveValue.newInt64(link.source()),
+                        destinationColumnName, PrimitiveValue.newInt64(link.destination())
+                )).toList()
+        );
+        retryTableCtx.supplyStatus(session -> session.executeBulkUpsert("/local/links", listLinks))
                 .join().expectSuccess();
     }
 
@@ -85,6 +111,28 @@ public class KeyValueApiYdbRepository {
 
 
                     return CompletableFuture.completedFuture(Result.success(listResult));
+                }
+        ).join().getValue();
+    }
+
+    /**
+     * Подсчет всех записей в таблице у которых есть хотя бы одна связь
+     */
+    public AtomicLong readTableCountLink() {
+        return retryTableCtx.supplyResult(session -> {
+                    AtomicLong count = new AtomicLong(0);
+                    session.executeReadTable("/local/issues", ReadTableSettings.newBuilder().build())
+                            .start(
+                                    readTablePart -> {
+                                        var resultSetReader = readTablePart.getResultSetReader();
+                                        while (resultSetReader.next()) {
+                                            ValueReader column = resultSetReader.getColumn(linkCountColumnName);
+                                            long links = column.getInt64();
+                                            if (links > 0) count.incrementAndGet();
+                                        }
+                                    }
+                            ).join().expectSuccess();
+                    return CompletableFuture.completedFuture(Result.success(count));
                 }
         ).join().getValue();
     }

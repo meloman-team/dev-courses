@@ -1,6 +1,6 @@
-title, author
-t1, a1
-t2, a2
-t3, a3
-t4, a4
-t5, a5
+title,author,link_count
+t1,a1,1
+t2,a2,0
+t3,a3,0
+t4,a4,0
+t5,a5,1
